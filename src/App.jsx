@@ -5,6 +5,7 @@ import Details from './Details.jsx'
 import { gameVersions, search, resolve, mrpackToMods, j } from './api.js'
 
 const LOADERS = ['fabric', 'forge', 'neoforge', 'quilt']
+const LOADER_NAMES = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' }
 const SORTS = [['relevance', 'Relevance'], ['downloads', 'Downloads'], ['follows', 'Follows'], ['updated', 'Recently updated']]
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d } catch { return d } }
 const LOADER_META = { fabric: ['https://meta.fabricmc.net/v2/versions/loader', 'fabric-loader'], quilt: ['https://meta.quiltmc.org/v3/versions/loader', 'quilt-loader'] }
@@ -147,6 +148,7 @@ export default function App() {
     } catch (err) { setNote('Import failed: ' + err.message) }
   }
 
+  const counts = { selection: selected.length, packs: packs.length, favorites: favs.length }
   const slugSet = new Set(plan.map((p) => p.slug).filter(Boolean))
   const conflicts = CONFLICTS.filter(([a, b]) => slugSet.has(a) && slugSet.has(b)).map(([a, b]) => `${plan.find((p) => p.slug === a).title} and ${plan.find((p) => p.slug === b).title}`)
   async function addPerf() {
@@ -242,20 +244,21 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <div className="brand"><b>DIV</b> Modpack Builder</div>
+        <div className="brand"><svg className="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 9.5v13L16 29 4 22.5v-13z" fill="var(--panel2)"/><path d="M16 3 28 9.5 16 16 4 9.5z" fill="var(--copper)"/><path d="M16 16v13L4 22.5v-13z" fill="var(--teal)" opacity=".85"/><path d="M16 16v13l12-6.5v-13z" fill="var(--teal)" opacity=".5"/></svg><span><b>DIV</b> Modpack Builder</span></div>
         <button className="icon" aria-label="Toggle theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
         <select value={version} onChange={(e) => setVersion(e.target.value)} aria-label="Minecraft version">{versions.map((v) => <option key={v}>{v}</option>)}</select>
-        <select value={loader} onChange={(e) => setLoader(e.target.value)} aria-label="Mod loader">{LOADERS.map((l) => <option key={l}>{l}</option>)}</select>
+        <div className="seg" role="group" aria-label="Mod loader">{LOADERS.map((l) => <button key={l} className={loader === l ? 'active' : ''} aria-pressed={loader === l} onClick={() => setLoader(l)}>{LOADER_NAMES[l]}</button>)}</div>
         <button className="ghost mobile" onClick={() => setPanel(!panel)}>Selection ({selected.length})</button>
       </header>
       <main>
         <nav className="side" aria-label="Main">
           {NAV.map(([id, label, Icon]) => (
-            <button key={id} className={view === id ? 'active' : ''} onClick={() => (id === 'selection' ? setPanel(true) : setView(id))}><Icon size={16} /> {label}</button>
+            <button key={id} className={view === id ? 'active' : ''} onClick={() => (id === 'selection' ? setPanel(true) : setView(id))}><Icon size={16} /> {label}{counts[id] ? <i className="badge">{counts[id]}</i> : null}</button>
           ))}
         </nav>
         <section className="browse" hidden={view !== 'browse'}>
           <h1 className="title">Mods for Minecraft {version} <span>{loader}</span></h1>
+          <p className="sub">{total ? `${total.toLocaleString()} mods match your filters.` : 'Pick a version and loader, then add mods to your pack.'}</p>
           <div className="bar">
             <label className="search"><Search size={16} /><input placeholder="Search mods" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
             <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">{SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
@@ -263,15 +266,21 @@ export default function App() {
           {error && <div className="err"><AlertTriangle size={16} /> {error} <button onClick={() => setTick((t) => t + 1)}>Retry</button></div>}
           {!busy && !error && !hits.length && <p className="empty">No mods found for Minecraft {version} on {loader}. Try another search, version or loader.</p>}
           <div className="grid">
+            {busy && !hits.length && Array.from({ length: 6 }, (_, i) => <div key={i} className="card sk" aria-hidden="true" />)}
             {hits.map((h) => {
               const on = selected.some((x) => x.id === h.project_id)
               return (
-                <article key={h.project_id} className="card">
-                  <img src={h.icon_url || ''} alt="" width="48" height="48" />
+                <article key={h.project_id} className={'card' + (on ? ' picked' : '')}>
+                  {h.icon_url ? <img src={h.icon_url} alt="" width="56" height="56" loading="lazy" /> : <div className="ph" aria-hidden="true"><Package size={22} /></div>}
                   <div className="body">
                     <h3>{h.title}</h3>
+                    <span className="by">by {h.author}</span>
                     <p>{h.description}</p>
-                    <small>by {h.author} · {fmt(h.downloads)} downloads · {h.display_categories?.join(', ')}</small>
+                    <div className="meta">
+                      <span className="stat" title="Downloads"><Download size={12} /> {fmt(h.downloads)}</span>
+                      <span className="stat" title="Follows"><Heart size={12} /> {fmt(h.follows || 0)}</span>
+                      {h.display_categories?.slice(0, 3).map((c) => <span key={c} className="chip">{c}</span>)}
+                    </div>
                     <div className="row">
                       <button className={on ? 'on' : 'primary'} onClick={() => toggle(h)}>{on ? <><Check size={14} /> Added</> : <><Plus size={14} /> Add</>}</button>
                       <button onClick={() => setDetail({ id: h.project_id, title: h.title })}>Details</button>
@@ -294,7 +303,7 @@ export default function App() {
                 const on = selected.some((x) => x.id === f.id)
                 return (
                   <article key={f.id} className="card">
-                    <img src={f.icon || ''} alt="" width="48" height="48" />
+                    {f.icon ? <img src={f.icon} alt="" width="56" height="56" loading="lazy" /> : <div className="ph" aria-hidden="true"><Package size={22} /></div>}
                     <div className="body"><h3>{f.title}</h3>
                       <div className="row">
                         <button className={on ? 'on' : 'primary'} onClick={() => addRemove(f.id, f.title)}>{on ? 'Added' : 'Add'}</button>
@@ -352,12 +361,12 @@ export default function App() {
         )}
         <aside className={panel ? 'open' : ''}>
           <button className="ghost mobile" onClick={() => setPanel(false)}>Close</button>
-          <h2>My selection ({selected.length})</h2>
+          <div className="ahead"><h2>My selection</h2><span className="badge big">{selected.length}</span></div>
           <button className="ghost wide" disabled={perfBusy} onClick={addPerf}>{perfBusy ? 'Adding…' : 'Add performance mods'}</button>
           {planBusy && <p><Loader2 className="spin" size={14} /> Resolving dependencies…</p>}
           <ul>
             {plan.map((p) => (
-              <li key={p.id} className={p.error ? 'bad' : ''}>
+              <li key={p.id} className={p.error ? 'bad' : p.root ? '' : 'dep'}>
                 <div><b>{p.title}</b>
                   <small>{p.error ? p.error : p.root ? p.file?.filename : 'Dependency of ' + [...p.requiredBy].join(', ')}</small></div>
                 {p.root && <button className="icon" aria-label={`Remove ${p.title}`} onClick={() => setSelected((s) => s.filter((x) => x.id !== p.id))}><Trash2 size={14} /></button>}
