@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import JSZip from 'jszip'
-import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, ListChecks } from 'lucide-react'
+import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, ListChecks, Puzzle, Boxes, Image as ImageIcon, Sparkles, Database } from 'lucide-react'
 import Details from './Details.jsx'
-import { gameVersions, search, resolve, mrpackToMods, j } from './api.js'
+import { gameVersions, search, resolve, mrpackToMods, j, versionsPath } from './api.js'
+import { TYPES, T, typeOf } from './types.js'
 
 const LOADERS = ['fabric', 'forge', 'neoforge', 'quilt']
 const LOADER_NAMES = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' }
@@ -14,15 +15,15 @@ const toB64 = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).repla
 const fromB64 = (s) => JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/')))))
 function validPack(d) {
   if (!d || typeof d.v !== 'string' || !LOADERS.includes(d.l) || !Array.isArray(d.m)) throw new Error('Not a valid pack')
-  const m = d.m.filter((x) => x && /^[A-Za-z0-9]{6,12}$/.test(x.id)).slice(0, 100).map((x) => ({ id: x.id, title: String(x.title || x.id).slice(0, 80) }))
+  const m = d.m.filter((x) => x && /^[A-Za-z0-9]{6,12}$/.test(x.id)).slice(0, 100).map((x) => ({ id: x.id, title: String(x.title || x.id).slice(0, 80), type: typeOf(x.type) }))
   if (!m.length) throw new Error('The pack contains no mods')
   return { v: d.v.slice(0, 20), l: d.l, m }
 }
 const CONFLICTS = [['starlight', 'scalablelux'], ['starlight', 'phosphor'], ['scalablelux', 'phosphor'], ['lithium', 'canary'], ['sodium', 'embeddium'], ['sodium', 'rubidium'], ['embeddium', 'rubidium'], ['iris', 'oculus']]
 const PERF = { fabric: ['sodium', 'lithium', 'ferrite-core', 'modernfix', 'entityculling', 'immediatelyfast'], forge: ['embeddium', 'modernfix', 'ferrite-core', 'entityculling', 'immediatelyfast'] }
 PERF.quilt = PERF.fabric; PERF.neoforge = PERF.forge
-const q = (v, l) => `game_versions=${encodeURIComponent(JSON.stringify([v]))}&loaders=${encodeURIComponent(JSON.stringify([l]))}`
-const NAV = [['browse', 'Browse mods', Search], ['selection', 'My selection', ListChecks], ['packs', 'Saved modpacks', Bookmark], ['favorites', 'Favorites', Heart], ['settings', 'Settings', Settings], ['about', 'About', Info]]
+const TYPE_ICONS = { mod: <Puzzle size={15} />, modpack: <Boxes size={15} />, resourcepack: <ImageIcon size={15} />, shader: <Sparkles size={15} />, datapack: <Database size={15} /> }
+const NAV = [['browse', 'Browse', Search], ['selection', 'My selection', ListChecks], ['packs', 'Saved modpacks', Bookmark], ['favorites', 'Favorites', Heart], ['settings', 'Settings', Settings], ['about', 'About', Info]]
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')
 function save(blob, name) {
   const url = URL.createObjectURL(blob)
@@ -36,6 +37,7 @@ export default function App() {
   const [versions, setVersions] = useState([])
   const [version, setVersion] = useState(() => load('div.version', ''))
   const [loader, setLoader] = useState(() => load('div.loader', 'fabric'))
+  const [type, setType] = useState(() => { const t = load('div.type', 'mod'); return T[t] ? t : 'mod' })
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('downloads')
   const [hits, setHits] = useState([])
@@ -63,7 +65,7 @@ export default function App() {
   useEffect(() => {
     gameVersions().then((v) => { setVersions(v); setVersion((c) => c || v[0]) }).catch((e) => setError(e.message))
   }, [tick])
-  useEffect(() => { localStorage.setItem('div.version', JSON.stringify(version)); localStorage.setItem('div.loader', JSON.stringify(loader)) }, [version, loader])
+  useEffect(() => { localStorage.setItem('div.version', JSON.stringify(version)); localStorage.setItem('div.loader', JSON.stringify(loader)); localStorage.setItem('div.type', JSON.stringify(type)) }, [version, loader, type])
   useEffect(() => { localStorage.setItem('div.selected', JSON.stringify(selected)) }, [selected])
 
   const runSearch = (offset, append) => {
@@ -71,12 +73,13 @@ export default function App() {
     abort.current?.abort()
     const ac = (abort.current = new AbortController())
     setBusy(true); setError('')
-    search({ query, version, loader, sort, offset }, ac.signal)
+    search({ query, version, loader, sort, offset, type }, ac.signal)
       .then((r) => { setHits((h) => (append ? [...h, ...r.hits] : r.hits)); setTotal(r.total_hits) })
       .catch((e) => e.name !== 'AbortError' && setError(e.message))
       .finally(() => !ac.signal.aborted && setBusy(false))
   }
-  useEffect(() => { const t = setTimeout(() => runSearch(0, false), 350); return () => clearTimeout(t) }, [query, version, loader, sort, tick])
+  useEffect(() => { setHits([]); setTotal(0); if (version) setBusy(true) }, [type])
+  useEffect(() => { const t = setTimeout(() => runSearch(0, false), 350); return () => clearTimeout(t) }, [query, version, loader, sort, tick, type])
 
   useEffect(() => {
     if (!version || !selected.length) { setPlan([]); return }
@@ -86,7 +89,7 @@ export default function App() {
     return () => { dead = true }
   }, [selected, version, loader])
 
-  const toggle = (h) => setSelected((s) => (s.some((x) => x.id === h.project_id) ? s.filter((x) => x.id !== h.project_id) : [...s, { id: h.project_id, title: h.title }]))
+  const toggle = (h) => setSelected((s) => (s.some((x) => x.id === h.project_id) ? s.filter((x) => x.id !== h.project_id) : [...s, { id: h.project_id, title: h.title, type: typeOf(h.project_type || type) }]))
   const broken = plan.filter((p) => p.error)
   const ready = plan.filter((p) => p.file)
   const canExport = ready.length > 0 && !broken.length && !planBusy && !dl?.running
@@ -94,7 +97,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('div.favs', JSON.stringify(favs)) }, [favs])
   useEffect(() => { localStorage.setItem('div.packs', JSON.stringify(packs)) }, [packs])
   const toggleFav = (f) => setFavs((a) => (a.some((x) => x.id === f.id) ? a.filter((x) => x.id !== f.id) : [...a, f]))
-  const addRemove = (id, title) => setSelected((s) => (s.some((x) => x.id === id) ? s.filter((x) => x.id !== id) : [...s, { id, title }]))
+  const addRemove = (id, title, t) => setSelected((s) => (s.some((x) => x.id === id) ? s.filter((x) => x.id !== id) : [...s, { id, title, type: typeOf(t) }]))
   const savePack = () => { setPacks((p) => [...p, { id: crypto.randomUUID(), name: packName.trim() || `Pack ${p.length + 1}`, version, loader, mods: selected, saved: Date.now(), vers: Object.fromEntries(ready.map((x) => [x.id, { vid: x.version.id, num: x.version.version_number, title: x.title }])) }]); setPackName('') }
   const openPack = (p) => {
     if (selected.length && !confirm('Replace your current selection with this pack?')) return
@@ -123,29 +126,46 @@ export default function App() {
     const url = `${location.origin}${location.pathname}#pack=${toB64({ v: version, l: loader, m: selected })}`
     try { await navigator.clipboard.writeText(url); setNote('Share link copied.') } catch { prompt('Copy this share link:', url) }
   }
+  async function readMrpack(blob) {
+    const z = await JSZip.loadAsync(blob)
+    const entry = z.file('modrinth.index.json')
+    if (!entry) throw new Error('modrinth.index.json is missing')
+    const idx = JSON.parse(await entry.async('string'))
+    const { mods, missing } = await mrpackToMods(idx)
+    const dep = idx.dependencies || {}
+    const key = [['fabric-loader', 'fabric'], ['quilt-loader', 'quilt'], ['neoforge', 'neoforge'], ['forge', 'forge']].find(([k]) => dep[k])
+    return { d: { v: dep.minecraft, l: key ? key[1] : loader, m: mods }, missing }
+  }
+  function finishImport(d, missing) {
+    const v = validPack(d)
+    applyPack(v)
+    let msg = `Imported ${v.m.length} item(s).`
+    if (missing) msg += ` ${missing} file(s) were not found on Modrinth and were skipped.`
+    if (d.m.length > v.m.length) msg += ` Only the first ${v.m.length} of ${d.m.length} were loaded.`
+    setNote(msg)
+  }
   async function importFile(e) {
     const f = e.target.files[0]; e.target.value = ''
     if (!f) return
     setNote('Importing…')
     try {
-      let d, extra = ''
       if (f.name.endsWith('.mrpack')) {
-        const z = await JSZip.loadAsync(f)
-        const entry = z.file('modrinth.index.json')
-        if (!entry) throw new Error('modrinth.index.json is missing')
-        const idx = JSON.parse(await entry.async('string'))
-        const { mods, missing } = await mrpackToMods(idx)
-        const dep = idx.dependencies || {}
-        const key = [['fabric-loader', 'fabric'], ['quilt-loader', 'quilt'], ['neoforge', 'neoforge'], ['forge', 'forge']].find(([k]) => dep[k])
-        d = { v: dep.minecraft, l: key ? key[1] : loader, m: mods }
-        if (missing) extra = ` ${missing} file(s) were not found on Modrinth and were skipped.`
+        const { d, missing } = await readMrpack(f)
+        finishImport(d, missing)
       } else {
         const man = JSON.parse(await f.text())
-        d = { v: man.minecraft, l: man.loader, m: (man.mods || []).filter((x) => x.reason === 'selected').map((x) => ({ id: x.projectId, title: x.project })) }
+        finishImport({ v: man.minecraft, l: man.loader, m: (man.mods || []).filter((x) => x.reason === 'selected').map((x) => ({ id: x.projectId, title: x.project, type: x.type })) }, 0)
       }
-      applyPack(validPack(d))
-      setNote('Imported ' + d.m.length + ' mods.' + extra)
     } catch (err) { setNote('Import failed: ' + err.message) }
+  }
+  async function baseOnModpack(file) {
+    setDetail(null); setNote('Reading modpack…')
+    try {
+      const r = await fetch(file.url)
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      const { d, missing } = await readMrpack(await r.blob())
+      finishImport(d, missing)
+    } catch (err) { setNote('Could not read modpack: ' + err.message) }
   }
 
   const counts = { selection: selected.length, packs: packs.length, favorites: favs.length }
@@ -159,8 +179,8 @@ export default function App() {
       const add = [], skip = []
       for (const p of projs) {
         if (selected.some((s) => s.id === p.id)) continue
-        const v = await j(`/project/${p.id}/version?${q(version, loader)}`)
-        v.length ? add.push({ id: p.id, title: p.title }) : skip.push(p.title)
+        const v = await j(versionsPath(p.id, version, 'mod', loader))
+        v.length ? add.push({ id: p.id, title: p.title, type: 'mod' }) : skip.push(p.title)
       }
       setSelected((s) => [...s, ...add])
       setNote(`Added ${add.length} performance mod(s).` + (skip.length ? ` No ${loader} release for ${version}: ${skip.join(', ')}.` : ''))
@@ -173,7 +193,7 @@ export default function App() {
     try {
       const out = [], next = { ...p.vers }
       for (const [id, o] of Object.entries(p.vers)) {
-        const vs = await j(`/project/${id}/version?${q(p.version, p.loader)}`)
+        const vs = await j(versionsPath(id, p.version, typeOf(p.mods.find((m) => m.id === id)?.type), p.loader))
         const latest = vs.find((x) => x.version_type === 'release') || vs[0]
         if (latest && latest.id !== o.vid) { out.push(`${o.title}: ${o.num} → ${latest.version_number}`); next[id] = { vid: latest.id, num: latest.version_number, title: o.title } }
       }
@@ -210,14 +230,15 @@ export default function App() {
         const want = p.file.hashes?.sha512
         if (want && hex(await crypto.subtle.digest('SHA-512', buf)) !== want) throw new Error('Hash mismatch')
         const name = safe(p.file.filename)
-        zip.file('mods/' + name, buf)
-        files.push({ project: p.title, projectId: p.id, versionId: p.version.id, url: `https://modrinth.com/mod/${p.slug}`, file: name, verified: !!want, reason: p.root ? 'selected' : 'required by ' + [...p.requiredBy].join(', ') })
+        const dir = T[typeOf(p.type)].dir
+        zip.file(dir + '/' + name, buf)
+        files.push({ project: p.title, projectId: p.id, type: typeOf(p.type), versionId: p.version.id, url: `https://modrinth.com/${typeOf(p.type)}/${p.slug}`, file: dir + '/' + name, verified: !!want, reason: p.root ? 'selected' : 'required by ' + [...p.requiredBy].join(', ') })
       } catch (err) { if (ac.signal.aborted) break; failed.push(p) }
     }
     if (ac.signal.aborted) { setDl({ running: false, cancelled: true, done: files.length, total: list.length, failed: [] }); return }
     setDl((d) => ({ ...d, stage: 'Building ZIP…' }))
     zip.file('manifest.json', JSON.stringify({ app: 'DIV Modpack Builder', exported: new Date().toISOString(), minecraft: version, loader, mods: files, failed: failed.map((p) => p.title) }, null, 2))
-    zip.file('README.txt', `DIV Modpack Builder\nMinecraft ${version} / ${loader}\n\nThis archive contains mod JAR files only. It is not a complete Minecraft instance.\nInstall Minecraft and the ${loader} loader, then copy the JARs from mods/ into your profile's mods folder.\nRequired dependencies were resolved from Modrinth metadata; this does not guarantee a crash-free pack.\n`)
+    zip.file('README.txt', `DIV Modpack Builder\nMinecraft ${version} / ${loader}\n\nThis archive contains downloaded files only. It is not a complete Minecraft instance.\nInstall Minecraft (and the ${loader} loader for mods), then copy each folder:\n\nmods/          -> your profile's mods folder\nresourcepacks/ -> your profile's resourcepacks folder\nshaderpacks/   -> your profile's shaderpacks folder (needs Iris or OptiFine)\ndatapacks/     -> a world's datapacks folder (saves/<world>/datapacks)\nmodpacks/      -> import these .mrpack files in a launcher that supports Modrinth packs. Install each modpack on its own, not on top of other mods.\n\nRequired dependencies were resolved from Modrinth metadata; this does not guarantee a crash-free pack.\n`)
     save(await zip.generateAsync({ type: 'blob' }), `div-modpack-${version}-${loader}.zip`)
     setDl({ running: false, done: files.length, total: list.length, failed })
   }
@@ -225,6 +246,10 @@ export default function App() {
   async function exportMrpack() {
     setDl({ running: true, done: 0, total: 1, stage: 'Looking up loader version…', failed: [] })
     try {
+      const inc = ready.filter((p) => ['mod', 'resourcepack', 'shader'].includes(typeOf(p.type)))
+      if (!inc.length) throw new Error('an .mrpack can only hold mods, resource packs and shaders')
+      const skipped = ready.length - inc.length
+      const env = (x) => (['required', 'optional', 'unsupported'].includes(x) ? x : 'optional')
       const [u, key] = LOADER_META[loader]
       const lv = (await (await fetch(u)).json()).find((x) => x.stable !== false)?.version
       if (!lv) throw new Error('Could not find a loader version')
@@ -232,10 +257,10 @@ export default function App() {
       zip.file('modrinth.index.json', JSON.stringify({
         formatVersion: 1, game: 'minecraft', versionId: '1.0.0', name: `DIV Modpack ${version}`,
         dependencies: { minecraft: version, [key]: lv },
-        files: ready.map((p) => ({ path: 'mods/' + safe(p.file.filename), hashes: { sha1: p.file.hashes.sha1, sha512: p.file.hashes.sha512 }, env: { client: 'required', server: 'required' }, downloads: [p.file.url], fileSize: p.file.size })),
+        files: inc.map((p) => ({ path: T[typeOf(p.type)].dir + '/' + safe(p.file.filename), hashes: { sha1: p.file.hashes.sha1, sha512: p.file.hashes.sha512 }, env: { client: env(p.client), server: env(p.server) }, downloads: [p.file.url], fileSize: p.file.size })),
       }, null, 2))
       save(await zip.generateAsync({ type: 'blob' }), `div-modpack-${version}-${loader}.mrpack`)
-      setDl({ running: false, done: 1, total: 1, note: `.mrpack created with ${ready.length} mods and ${key} ${lv}.`, failed: [] })
+      setDl({ running: false, done: 1, total: 1, note: `.mrpack created with ${inc.length} files and ${key} ${lv}.` + (skipped ? ` ${skipped} modpack/data pack file(s) were left out.` : ''), failed: [] })
     } catch (err) {
       setDl({ running: false, done: 0, total: 1, note: '.mrpack export failed: ' + err.message, failed: [] })
     }
@@ -257,20 +282,32 @@ export default function App() {
           ))}
         </nav>
         <section className="browse" hidden={view !== 'browse'}>
+<<<<<<< HEAD
           <h1 className="title">Mods for Minecraft {version} <span>{loader}</span></h1>
           <p className="sub">{total ? `${total.toLocaleString()} mods match your filters.` : 'Pick a version and loader, then add mods to your pack.'}</p>
+=======
+          <h1 className="title">{T[type].label} for Minecraft {version} {T[type].loader && <span>{LOADER_NAMES[loader]}</span>}</h1>
+          <p className="sub">{total ? `${total.toLocaleString()} ${T[type].label.toLowerCase()} match your filters.` : 'Pick a version, then add items to your selection.'}</p>
+          <div className="tabs" role="tablist" aria-label="Content type">
+            {TYPES.map((t) => <button key={t.id} role="tab" aria-selected={type === t.id} className={type === t.id ? 'active' : ''} onClick={() => setType(t.id)}>{TYPE_ICONS[t.id]} {t.label}</button>)}
+          </div>
+>>>>>>> a65c9d7 (add more things to download)
           <div className="bar">
-            <label className="search"><Search size={16} /><input placeholder="Search mods" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+            <label className="search"><Search size={16} /><input placeholder={`Search ${T[type].label.toLowerCase()}`} value={query} onChange={(e) => setQuery(e.target.value)} /></label>
             <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">{SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </div>
           {error && <div className="err"><AlertTriangle size={16} /> {error} <button onClick={() => setTick((t) => t + 1)}>Retry</button></div>}
-          {!busy && !error && !hits.length && <p className="empty">No mods found for Minecraft {version} on {loader}. Try another search, version or loader.</p>}
+          {!busy && !error && !hits.length && <p className="empty">No {T[type].label.toLowerCase()} found for Minecraft {version}{T[type].loader ? ` on ${LOADER_NAMES[loader]}` : ''}. Try another search{T[type].loader ? ', version or loader' : ' or version'}.</p>}
           <div className="grid">
             {busy && !hits.length && Array.from({ length: 6 }, (_, i) => <div key={i} className="card sk" aria-hidden="true" />)}
             {hits.map((h) => {
               const on = selected.some((x) => x.id === h.project_id)
               return (
                 <article key={h.project_id} className={'card' + (on ? ' picked' : '')}>
+<<<<<<< HEAD
+=======
+                  {type !== 'mod' && h.featured_gallery && <img className="shot" src={h.featured_gallery} alt="" loading="lazy" />}
+>>>>>>> a65c9d7 (add more things to download)
                   {h.icon_url ? <img src={h.icon_url} alt="" width="56" height="56" loading="lazy" /> : <div className="ph" aria-hidden="true"><Package size={22} /></div>}
                   <div className="body">
                     <h3>{h.title}</h3>
@@ -283,8 +320,8 @@ export default function App() {
                     </div>
                     <div className="row">
                       <button className={on ? 'on' : 'primary'} onClick={() => toggle(h)}>{on ? <><Check size={14} /> Added</> : <><Plus size={14} /> Add</>}</button>
-                      <button onClick={() => setDetail({ id: h.project_id, title: h.title })}>Details</button>
-                      <button className={'icon' + (favs.some((f) => f.id === h.project_id) ? ' on' : '')} aria-label="Favorite" onClick={() => toggleFav({ id: h.project_id, title: h.title, icon: h.icon_url, slug: h.slug })}><Heart size={14} /></button>
+                      <button onClick={() => setDetail({ id: h.project_id, title: h.title, type })}>Details</button>
+                      <button className={'icon' + (favs.some((f) => f.id === h.project_id) ? ' on' : '')} aria-label="Favorite" onClick={() => toggleFav({ id: h.project_id, title: h.title, icon: h.icon_url, slug: h.slug, type })}><Heart size={14} /></button>
                     </div>
                   </div>
                 </article>
@@ -306,8 +343,8 @@ export default function App() {
                     {f.icon ? <img src={f.icon} alt="" width="56" height="56" loading="lazy" /> : <div className="ph" aria-hidden="true"><Package size={22} /></div>}
                     <div className="body"><h3>{f.title}</h3>
                       <div className="row">
-                        <button className={on ? 'on' : 'primary'} onClick={() => addRemove(f.id, f.title)}>{on ? 'Added' : 'Add'}</button>
-                        <button onClick={() => setDetail({ id: f.id, title: f.title })}>Details</button>
+                        <button className={on ? 'on' : 'primary'} onClick={() => addRemove(f.id, f.title, f.type)}>{on ? 'Added' : 'Add'}</button>
+                        <button onClick={() => setDetail({ id: f.id, title: f.title, type: f.type })}>Details</button>
                         <button className="icon" aria-label="Remove favorite" onClick={() => toggleFav(f)}><Trash2 size={14} /></button>
                       </div></div>
                   </article>
@@ -353,9 +390,9 @@ export default function App() {
         {view === 'about' && (
           <section className="browse">
             <h2>About DIV Modpack Builder</h2>
-            <p>Search Modrinth mods, pick a Minecraft version and loader, and download your selection with its required dependencies as one ZIP or .mrpack.</p>
+            <p>Search Modrinth for mods, modpacks, resource packs, shaders and data packs. Pick a Minecraft version and loader, and download your selection with its required dependencies as one ZIP, or as an .mrpack for mods, resource packs and shaders.</p>
             <p>All mod data and files come from the Modrinth API. This is an unofficial tool and is not affiliated with Modrinth, Mojang or Microsoft.</p>
-            <p>The ZIP contains mod JAR files only, not a full Minecraft instance. Install Minecraft and the matching loader separately, then place the JARs in your profile's mods folder.</p>
+            <p>The ZIP sorts files into mods, resourcepacks, shaderpacks, datapacks and modpacks folders. It is not a full Minecraft instance: install Minecraft and the matching loader separately, then copy each folder into your profile.</p>
             <p>Dependency resolution and the known-conflict warnings reduce problems but cannot guarantee a crash-free pack.</p>
           </section>
         )}
@@ -364,6 +401,7 @@ export default function App() {
           <div className="ahead"><h2>My selection</h2><span className="badge big">{selected.length}</span></div>
           <button className="ghost wide" disabled={perfBusy} onClick={addPerf}>{perfBusy ? 'Adding…' : 'Add performance mods'}</button>
           {planBusy && <p><Loader2 className="spin" size={14} /> Resolving dependencies…</p>}
+<<<<<<< HEAD
           <ul>
             {plan.map((p) => (
               <li key={p.id} className={p.error ? 'bad' : p.root ? '' : 'dep'}>
@@ -373,6 +411,26 @@ export default function App() {
               </li>
             ))}
           </ul>
+=======
+          {TYPES.map((t) => {
+            const items = plan.filter((p) => p.type === t.id)
+            if (!items.length) return null
+            return (
+              <div key={t.id} className="grp">
+                <h4>{t.label} <i className="badge">{items.length}</i></h4>
+                <ul>
+                  {items.map((p) => (
+                    <li key={p.id} className={p.error ? 'bad' : p.root ? '' : 'dep'}>
+                      <div><b>{p.title}</b>
+                        <small>{p.error ? p.error : p.root ? p.file?.filename : 'Dependency of ' + [...p.requiredBy].join(', ')}</small></div>
+                      {p.root && <button className="icon" aria-label={`Remove ${p.title}`} onClick={() => setSelected((s) => s.filter((x) => x.id !== p.id))}><Trash2 size={14} /></button>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
+>>>>>>> a65c9d7 (add more things to download)
           {!selected.length && <p className="empty">Add mods to start your pack.</p>}
           {plan.optional?.some((o) => !selected.some((s) => s.id === o.id)) && (
             <div className="opt">
@@ -385,6 +443,7 @@ export default function App() {
           <div className={'status ' + (broken.length ? 'bad' : ready.length ? 'ok' : '')}>
             {broken.length ? `Incompatible: ${broken.length} mod(s) have no release for ${version} on ${loader}. Remove them or change version/loader.` : ready.length ? 'All required dependencies resolved from Modrinth. Mod-to-mod conflicts are not checked.' : 'Nothing to check yet.'}
           </div>
+          {plan.some((p) => p.type === 'modpack') && plan.length > 1 && <div className="status warn">A modpack installs as its own instance. Mixing it with other items usually breaks it, so download the modpack on its own.</div>}
           {conflicts.map((c) => <div key={c} className="status warn">{c}: commonly reported as incompatible. Remove one unless you have verified they work together.</div>)}
           <p className="small">{ready.length} files · {(ready.reduce((n, p) => n + (p.file.size || 0), 0) / 1048576).toFixed(1)} MB</p>
           {dl && (
@@ -408,7 +467,7 @@ export default function App() {
           {note && <p className="small" role="status">{note}</p>}
         </aside>
       </main>
-      {detail && <Details item={detail} version={version} loader={loader} onClose={() => setDetail(null)} />}
+      {detail && <Details item={detail} version={version} loader={loader} onClose={() => setDetail(null)} onBase={baseOnModpack} />}
     </div>
   )
 }

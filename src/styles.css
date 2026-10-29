@@ -79,6 +79,21 @@ a{color:var(--teal);font-size:14px;text-decoration:none}a:hover{text-decoration:
 .more{margin:24px auto;display:flex;padding:10px 22px}
 h2{font-size:24px;margin:0 0 14px}
 
+<<<<<<< HEAD
+=======
+/* content types */
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:0 0 16px;padding:2px 2px 6px}
+.tabs button{border-radius:99px;padding:7px 14px;background:none;color:var(--mute);white-space:nowrap}
+.tabs button:hover:not(:disabled){color:var(--text)}
+.tabs button.active{color:var(--text);background:var(--panel2);border-color:var(--copper);font-weight:600}
+.card{flex-wrap:wrap}
+.card img.shot{flex:0 0 100%;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;border-radius:10px;background:var(--panel2)}
+.hero{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:12px;margin-bottom:16px;background:var(--panel2)}
+.grp h4{margin:16px 0 0;font:600 14px/1 var(--font);color:var(--mute);display:flex;align-items:center;gap:8px}
+.grp ul{margin-top:2px}
+.card .body{flex:1 1 0}
+
+>>>>>>> a65c9d7 (add more things to download)
 /* selection panel */
 aside{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:20px;position:sticky;top:96px;max-height:calc(100vh - 120px);overflow:auto}
 .ahead{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
